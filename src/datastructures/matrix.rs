@@ -17,7 +17,7 @@ use std::ops::{Mul, Index, IndexMut};
 ///
 /// Matrix also has index operations defined. You can do `matrix[i][j]` on both mutable and immutable objects/references.
 ///
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Matrix<T: Copy + Num + PartialEq + Mul<Output=T>> {
     pub rows: usize,
     pub cols: usize,
@@ -57,6 +57,21 @@ impl <T: Copy + Num + PartialEq + Mul<Output=T>> Matrix<T> {
             assert_eq!(cols, matrix[i].len(), "Unequal columns in rows.");
         }
         Matrix { rows, cols, store: matrix }
+    }
+
+    ///
+    /// Constructor. This returns an `nxn` identity matrix.
+    /// Arguments:
+    ///   - Size if identity matrix
+    /// Returns:
+    ///   - Identity matrix of size `n`.
+    ///
+    pub fn identity(n: usize)-> Matrix<T> {
+        let mut retval = Matrix::new(n, n);
+        for i in 0..n {
+            retval[i][i] = T::one();
+        }
+        retval
     }
 
     ///
@@ -127,6 +142,68 @@ impl <T: Copy + Num + PartialEq + Mul<Output=T>> Matrix<T> {
             self.store[row][i] = self.store[row][i] * a;
         }
     }
+
+    ///
+    /// Matrix method to add with another matrix and return a new matrix. This function returns a
+    /// `Result<Matrix, InputError>`. If the dimensions do not match, an Error is returned.
+    /// Arguments:
+    ///   - other: RHS matrix
+    /// Returns:
+    ///   New matrix that is a sum of this and RHS. (Err if input error)
+    ///
+    pub fn add(&self, other: &Matrix<T>)-> Result<Matrix<T>, super::InputError> {
+        if self.rows != other.rows || self.cols != other.cols {
+            Err(
+                super::InputError {
+                    message: format!(
+                        "RHS matrix dims ({} x {}) not the same as this ({} x {})",
+                        other.rows,
+                        other.cols,
+                        self.rows,
+                        self.cols
+                    )
+                }
+            )
+        } else {
+            let mut retval = Matrix::<T>::new(self.rows,self.cols);
+            for r in  0..self.rows {
+                for c in 0..self.cols {
+                    retval[r][c] = self.store[r][c] + other.store[r][c];
+                }
+            }
+            Ok(retval)
+        }
+    }
+
+    ///
+    /// Matrix method to multiply with another matrix and return a new matrix. This function returns a
+    /// `Result<Matrix, InputError>`. If the dimensions do not match, an Error is returned.
+    /// Arguments:
+    ///   - other: RHS matrix
+    /// Returns:
+    ///   New matrix that is a product of this and RHS. (Err if input error)
+    ///
+    pub fn multiply(&self, other: &Matrix<T>)-> Result<Matrix<T>, super::InputError> {
+        if self.cols != other.rows {
+            Err(
+                super::InputError {
+                    message: format!("# cols of the matrix ({}) != # rows of RHS matrix ({})", self.cols, other.rows)
+                }
+            )
+        } else {
+            let mut retval = Matrix::new(self.rows, other.cols);
+            for i in 0..self.rows {
+                for j in 0..other.cols {
+                    let mut acc: T = T::zero();
+                    for k in 0..self.cols {
+                        acc = acc + self[i][k]*other[k][j];
+                    }
+                    retval[i][j] = acc;
+                }
+            }
+            Ok(retval)
+        }
+    }
 }
 
 impl <T: Copy + Num + PartialEq + Mul<Output=T>> Index<usize> for Matrix<T> {
@@ -145,6 +222,34 @@ impl <T: Copy + Num + PartialEq + Mul<Output=T>> IndexMut<usize> for Matrix<T> {
 
 #[cfg(test)]
 mod tests {
+    use crate::datastructures::Matrix;
+    use num::Num;
+    use std::ops::Mul;
+
+    // We are omitting implementing the equality trait as it is an expensive operation, and is
+    // not that important outside of testing scenarios.
+    impl <T: Copy + Num + PartialEq + Mul<Output=T>> PartialEq for Matrix<T> {
+        fn eq(&self, other: &Self) -> bool {
+            self.rows == other.rows &&
+                self.cols == other.cols &&
+                {
+                    let mut flag = true;
+                    for r in 0..self.rows {
+                        for c in 0..self.cols {
+                            if self.store[r][c] != other.store[r][c] {
+                                flag = false;
+                                break;
+                            }
+                        }
+                        if !flag {
+                            break;
+                        }
+                    }
+                    flag
+                }
+        }
+    }
+
     #[test]
     fn test_constructor() {
         let my_matrix: super::Matrix<f64> = super::Matrix::new(3, 4);
@@ -160,6 +265,18 @@ mod tests {
         );
         assert_eq!(3, my_matrix_2.rows);
         assert_eq!(4, my_matrix_2.cols);
+
+        let id_matrix: Matrix<f64> = Matrix::identity(3);
+        assert_eq!(
+            Matrix::<f64>::from_vectors(
+                vec![
+                    vec![1f64, 0f64, 0f64],
+                    vec![0f64, 1f64, 0f64],
+                    vec![0f64, 0f64, 1f64]
+                ]
+            ),
+            id_matrix
+        )
     }
 
     #[test]
@@ -295,5 +412,119 @@ mod tests {
                 Vec::<f64>::new()
             ]
         );
+    }
+
+    #[test]
+    fn test_add_happy_case() {
+        let m1: Matrix<f64> = Matrix::from_vectors(
+            vec![
+                vec![1f64, 2f64],
+                vec![3f64, 4f64]
+            ]
+        );
+
+        let m2: Matrix<f64> = Matrix::from_vectors(
+            vec![
+                vec![5f64, 6f64],
+                vec![7f64, 8f64]
+            ]
+        );
+
+        assert!(
+            m1.add(&m2).unwrap() ==
+            Matrix::<f64>::from_vectors(
+                vec![
+                    vec![ 6f64,  8f64],
+                    vec![10f64, 12f64]
+                ]
+            )
+        )
+    }
+
+    #[test]
+    fn test_add_error() {
+        let m1: Matrix<f64> = Matrix::from_vectors(
+            vec![
+                vec![1f64, 2f64],
+                vec![3f64, 4f64]
+            ]
+        );
+
+        let m2: Matrix<f64> = Matrix::from_vectors(
+            vec![
+                vec![5f64, 6f64, 100f64],
+                vec![7f64, 8f64, 200f64]
+            ]
+        );
+
+        assert_eq!(
+            Err(
+                super::super::InputError {
+                    message: "RHS matrix dims (2 x 3) not the same as this (2 x 2)".to_string()
+                }
+            ),
+            m1.add(&m2)
+        )
+    }
+
+    #[test]
+    fn test_multiply_happy_case() {
+        let m1: Matrix<f64> = Matrix::from_vectors(
+            vec![
+                vec![1f64, 2f64, 3f64],
+                vec![4f64, 5f64, 6f64]
+            ]
+        );
+
+        let m2: Matrix<f64> = Matrix::from_vectors(
+            vec![
+                vec![1f64],
+                vec![2f64],
+                vec![3f64]
+            ]
+        );
+
+        assert!(
+            m1.multiply(&m2).unwrap() ==
+                Matrix::<f64>::from_vectors(
+                    vec![
+                        vec![14f64],
+                        vec![32f64]
+                    ]
+                )
+        );
+
+        assert_eq!(
+            m1,
+            m1.multiply(
+                &Matrix::identity(m1.cols)
+            ).unwrap()
+        )
+    }
+
+    #[test]
+    fn test_multiply_error() {
+        let m1: Matrix<f64> = Matrix::from_vectors(
+            vec![
+                vec![1f64, 2f64, 10f64],
+                vec![3f64, 4f64, 11f64]
+            ]
+        );
+
+        let m2: Matrix<f64> = Matrix::from_vectors(
+            vec![
+                vec![5f64, 6f64, 100f64],
+                vec![7f64, 8f64, 200f64]
+            ]
+        );
+
+        assert_eq!(
+            Err(
+                super::super::InputError {
+                    message: "# cols of the matrix (3) != # rows of RHS matrix (2)".to_string()
+                }
+            ),
+            m1.multiply(&m2)
+        )
     }
 }
